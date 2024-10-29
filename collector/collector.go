@@ -36,7 +36,7 @@ var (
 const (
 	// Namespace for all metrics.
 	namespace = "pg"
-
+	timeout_seconds = 5
 	defaultEnabled  = true
 	defaultDisabled = false
 )
@@ -164,7 +164,9 @@ func (p PostgresCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements the prometheus.Collector interface.
 func (p PostgresCollector) Collect(ch chan<- prometheus.Metric) {
-	ctx := context.TODO()
+	// ctx := context.TODO()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout_seconds*time.Second)
+    	defer cancel()
 
 	// copy the instance so that concurrent scrapes have independent instances
 	inst := p.instance.copy()
