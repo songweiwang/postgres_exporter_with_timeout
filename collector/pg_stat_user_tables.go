@@ -17,11 +17,15 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const userTableSubsystem = "stat_user_tables"
+const (
+	userTableSubsystem = "stat_user_tables"
+	timeout_seconds = 1
+)
 
 func init() {
 	registerCollector(userTableSubsystem, defaultEnabled, NewPGStatUserTablesCollector)
@@ -187,8 +191,15 @@ var (
 
 func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
-	rows, err := db.QueryContext(ctx,
+	
+	ctx_timeout, cancel := context.WithTimeout(context.Background(), timeout_seconds*time.Second)
+	defer cancel()
+	rows, err := db.QueryContext(ctx_timeout,
 		statUserTablesQuery)
+
+	if ctx_timeout.Err() == context.DeadlineExceeded {
+		return context.DeadlineExceeded
+	}
 
 	if err != nil {
 		return err
