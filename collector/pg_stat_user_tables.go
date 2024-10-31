@@ -16,15 +16,13 @@ package collector
 import (
 	"context"
 	"database/sql"
-	"log/slog"
-	"time"
 
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
 	userTableSubsystem = "stat_user_tables"
-	timeout_seconds = 1
 )
 
 func init() {
@@ -32,7 +30,7 @@ func init() {
 }
 
 type PGStatUserTablesCollector struct {
-	log *slog.Logger
+	log log.Logger
 }
 
 func NewPGStatUserTablesCollector(config collectorConfig) (Collector, error) {
@@ -154,13 +152,7 @@ var (
 		[]string{"datname", "schemaname", "relname"},
 		prometheus.Labels{},
 	)
-	statUserTablesTotalSize = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, userTableSubsystem, "size_bytes"),
-		"Total disk space used by this table, in bytes, including all indexes and TOAST data",
-		[]string{"datname", "schemaname", "relname"},
-		prometheus.Labels{},
-	)
-
+	
 	statUserTablesQuery = `SELECT
 		current_database() datname,
 		schemaname,
@@ -183,8 +175,7 @@ var (
 		vacuum_count,
 		autovacuum_count,
 		analyze_count,
-		autoanalyze_count,
-		pg_total_relation_size(relid) as total_size
+		autoanalyze_count
 	FROM
 		pg_stat_user_tables`
 )
@@ -192,27 +183,19 @@ var (
 func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instance, ch chan<- prometheus.Metric) error {
 	db := instance.getDB()
 	
-	ctx_timeout, cancel := context.WithTimeout(context.Background(), timeout_seconds*time.Second)
-	defer cancel()
-	rows, err := db.QueryContext(ctx_timeout,
-		statUserTablesQuery)
-
-	if ctx_timeout.Err() == context.DeadlineExceeded {
-		return context.DeadlineExceeded
-	}
-
+	rows, err := db.QueryContext(ctx, statUserTablesQuery)
+		
 	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
+        return err
+    }
+    defer rows.Close()
+	
 	for rows.Next() {
 		var datname, schemaname, relname sql.NullString
-		var seqScan, seqTupRead, idxScan, idxTupFetch, nTupIns, nTupUpd, nTupDel, nTupHotUpd, nLiveTup, nDeadTup,
-			nModSinceAnalyze, vacuumCount, autovacuumCount, analyzeCount, autoanalyzeCount, totalSize sql.NullInt64
+		var seqScan, seqTupRead, idxScan, idxTupFetch, nTupIns, nTupUpd, nTupDel, nTupHotUpd, nLiveTup, nDeadTup, nModSinceAnalyze, vacuumCount, autovacuumCount, analyzeCount, autoanalyzeCount sql.NullInt64
 		var lastVacuum, lastAutovacuum, lastAnalyze, lastAutoanalyze sql.NullTime
 
-		if err := rows.Scan(&datname, &schemaname, &relname, &seqScan, &seqTupRead, &idxScan, &idxTupFetch, &nTupIns, &nTupUpd, &nTupDel, &nTupHotUpd, &nLiveTup, &nDeadTup, &nModSinceAnalyze, &lastVacuum, &lastAutovacuum, &lastAnalyze, &lastAutoanalyze, &vacuumCount, &autovacuumCount, &analyzeCount, &autoanalyzeCount, &totalSize); err != nil {
+		if err := rows.Scan(&datname, &schemaname, &relname, &seqScan, &seqTupRead, &idxScan, &idxTupFetch, &nTupIns, &nTupUpd, &nTupDel, &nTupHotUpd, &nLiveTup, &nDeadTup, &nModSinceAnalyze, &lastVacuum, &lastAutovacuum, &lastAnalyze, &lastAutoanalyze, &vacuumCount, &autovacuumCount, &analyzeCount, &autoanalyzeCount); err != nil {
 			return err
 		}
 
@@ -438,16 +421,6 @@ func (c *PGStatUserTablesCollector) Update(ctx context.Context, instance *instan
 			datnameLabel, schemanameLabel, relnameLabel,
 		)
 
-		totalSizeMetric := 0.0
-		if totalSize.Valid {
-			totalSizeMetric = float64(totalSize.Int64)
-		}
-		ch <- prometheus.MustNewConstMetric(
-			statUserTablesTotalSize,
-			prometheus.GaugeValue,
-			totalSizeMetric,
-			datnameLabel, schemanameLabel, relnameLabel,
-		)
 	}
 
 	if err := rows.Err(); err != nil {
